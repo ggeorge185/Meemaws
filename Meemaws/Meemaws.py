@@ -1,23 +1,21 @@
-#!/usr/bin/env python3
 from langchain.chains import RetrievalQA
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.callbacks import StreamingStdOutCallbackHandler
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.vectorstores import Chroma
 from langchain.llms import Ollama
 import chromadb
 import os
 import argparse
 import time
-import requests
 
-model = os.environ.get("MODEL", "Meemaw")
+
+model = os.environ.get("MODEL", "Mistral")
 embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME", "all-MiniLM-L6-v2")
 persist_directory = os.environ.get("PERSIST_DIRECTORY", "db")
 target_source_chunks = int(os.environ.get('TARGET_SOURCE_CHUNKS', 4))
 
-from constants import CHROMA_SETTINGS
-
-def main():
+def qa():
+    # Parse the command line arguments
     args = parse_arguments()
     embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
     db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
@@ -25,44 +23,54 @@ def main():
     callbacks = [] if args.mute_stream else [StreamingStdOutCallbackHandler()]
     llm = Ollama(model=model, callbacks=callbacks)
     qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=not args.hide_source)
-    user_preferences = get_user_preferences()
+
+    print("Welcome to Meemaw! Let's find the perfect dish for you.")
+    
     while True:
-        query = input("\nEnter your query\n ")
-        if query.lower() == "exit":
-            break
-        if query.strip() == "":
+        cuisine = input("What type of cuisine are you in the mood for? (e.g., Italian, Chinese, Mexican): ").strip()
+        main_ingredient = input("What main ingredient would you like to include? (e.g., chicken, beef, tofu): ").strip()
+        dietary_preference = input("Any dietary preferences or restrictions? (e.g., vegetarian, gluten-free): ").strip()
+        
+        if not cuisine or not main_ingredient:
+            print("Cuisine and main ingredient are required to provide a recommendation. Please try again.")
             continue
-        if query.lower() == "source":
+
+        query = f"Recommend atleast 5 dishes with {cuisine} dish with {main_ingredient} that is {dietary_preference if dietary_preference else 'no specific dietary preference. If my query is in german,spanish,italian or french please reply with the same'}."
+        start = time.time()
+        res = qa(query)
+        answer, docs = res['result'], [] if args.hide_source else res['source_documents']
+        end = time.time()
+        
+        # print(f"\n\nRecommended Dish: {answer} \n")
+        # if not args.hide_source:
+        #     print("\nSources:")
+        #     for document in docs:
+        #         print("\n> " + document.metadata["source"] + ":")
+        #         print(document.page_content)
+
+        another_query = input("\nWould you like another recommendation? (yes/no): ").strip().lower()
+        if another_query != 'yes':
+            break
+        
+        andanother_query = input("\n Would you like to see the source? (yes/no) or you can type exit: ").strip().lower()
+        if andanother_query == "exit":
+            break
+        elif andanother_query == "yes":
+            # Print the relevant sources used for the answer
             for document in docs:
                 print("\n> " + document.metadata["source"] + ":")
                 print(document.page_content)
+        elif andanother_query == "no":
             continue
+        else:
+            print("Invalid input, continuing with new recommendation.")
 
-        query_with_preferences = f"{query} considering {user_preferences}"
-        start = time.time()
-        try:
-            res = qa(query_with_preferences)
-            answer, docs = res['result'], [] if args.hide_source else res['source_documents']
-            end = time.time()
-        except requests.exceptions.ConnectionError as e:
-            print(f"Failed to connect to the server: {e}")
-            break
-
-def get_user_preferences():
-    print("Hi dearie, let's gather your food preferences first.")
-    dietary_restrictions = input("Do you have any dietary restrictions (e.g., vegetarian, vegan, gluten-free)? ")
-    allergons = input("Are you allergic to any food?")
-    preferred_cuisine = input("Do you have a preferred cuisine (e.g., Italian, Mexican, Chinese)? ")
-    occasion = input("What occasion are you making food for today (e.g., birthday, casual meal, holiday)? ")
-    preferences = f"dietary restrictions: {dietary_restrictions},  " \
-                  f"allergons: {allergons}, preferred cuisine: {preferred_cuisine}, occasion: {occasion}"
-    return preferences
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='MeemawGPT: Ask recipes to your documents without an internet connection, using the power of LLMs.')
+    parser = argparse.ArgumentParser(description='BabushkaGPT: Ask for recipe recommendations based on your preferences.')
     parser.add_argument("--hide-source", "-S", action='store_true', help='Use this flag to disable printing of source documents used for answers.')
     parser.add_argument("--mute-stream", "-M", action='store_true', help='Use this flag to disable the streaming StdOut callback for LLMs.')
     return parser.parse_args()
 
 if __name__ == "__main__":
-    main()
+    qa()
