@@ -1,0 +1,6 @@
+flask
+langchain
+chroma
+huggingface_hub
+ollama
+langchain-community
